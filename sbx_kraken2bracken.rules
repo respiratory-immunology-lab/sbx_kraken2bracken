@@ -1,0 +1,96 @@
+rule kraken2_report:
+    input:
+        expand(str(QC_FP/'decontam'/'{{sample}}_{rp}.fastq.gz'),rp = Pairs)
+    output:
+        raw = str(CLASSIFY_FP/'kraken2'/'raw'/'{sample}.kraken'),
+        report = str(CLASSIFY_FP/'kraken2'/'report'/'{sample}.kreport')
+    params:
+        db = Cfg["sbx_kraken2bracken"]["db"],
+        paired_end = "--paired" if Cfg['all']['paired_end'] else ""
+    threads:
+        Cfg["sbx_kraken2bracken"]["threads"]
+    conda:
+        "sbx_kraken2bracken_env.yml"
+    shell:
+        """
+        kraken2 --gzip-compressed \
+                --db {params.db} \
+                --report {output.report} \
+                --threads {threads} \
+                {params.paired_end} {input} \
+                > {output.raw}
+        """
+
+rule bracken_report_S:
+    input:
+        str(CLASSIFY_FP/'kraken2'/'report'/'{sample}.kreport')
+    output:
+        raw = str(CLASSIFY_FP/'bracken'/'raw'/'{sample}.bracken'),
+        report1 = str(CLASSIFY_FP/'kraken2'/'report'/'{sample}_bracken_species.kreport'),
+        report2 = str(CLASSIFY_FP/'bracken'/'report'/'{sample}_bracken_species.kreport')
+    params:
+        db = Cfg["sbx_kraken2bracken"]["db"],
+        len = Cfg["sbx_kraken2bracken"]["read_length"]
+    conda:
+        "sbx_kraken2bracken_env.yml"
+    shell:
+        """
+        bracken -d {params.db} -i {input} \
+        -o {output.raw} -r {params.len} -l S -t 10
+        cp {output.report1} {output.report2}
+        """
+
+rule kraken2_biom:
+    input:
+        expand(str(CLASSIFY_FP/'kraken2'/'report'/'{sample}.kreport'),
+               sample=Samples.keys())
+    output:
+        str(CLASSIFY_FP/'kraken2'/'all_samples_kraken2.biom')
+    conda:
+        "sbx_kraken2bracken_env.yml"
+    shell:
+        """
+        kraken-biom --max D -o {output} {input}
+        """
+
+rule bracken_biom_S:
+    input:
+        expand(str(CLASSIFY_FP/'bracken'/'report'/'{sample}_bracken_species.kreport'),
+               sample=Samples.keys())
+    output:
+        str(CLASSIFY_FP/'bracken'/'all_samples_bracken.biom')
+    conda:
+        "sbx_kraken2bracken_env.yml"
+    shell:
+        """
+        kraken-biom --max D -o {output} {input}
+        """
+
+rule classic_biom_kraken2:
+    input:
+        str(CLASSIFY_FP/'kraken2'/'all_samples_kraken2.biom')
+    output:
+        str(CLASSIFY_FP/'kraken2'/'all_samples_kraken2.tsv')
+    shell:
+        """
+        biom convert -i {input} -o {output} \
+        --to-tsv --header-key=taxonomy --process-obs-metadata=taxonomy \
+        --output-metadata-id="Consensus Lineage"
+        """
+
+rule classic_biom_bracken_S:
+    input:
+        str(CLASSIFY_FP/'bracken'/'all_samples_bracken.biom')
+    output:
+        str(CLASSIFY_FP/'bracken'/'all_samples_bracken.tsv')
+    shell:
+        """
+        biom convert -i {input} -o {output} \
+        --to-tsv --header-key=taxonomy --process-obs-metadata=taxonomy \
+        --output-metadata-id="Consensus Lineage"
+        """
+
+rule all_kraken2bracken:
+    input:
+        str(CLASSIFY_FP/'kraken2'/'all_samples_kraken2.tsv'),
+        str(CLASSIFY_FP/'bracken'/'all_samples_bracken.tsv')
